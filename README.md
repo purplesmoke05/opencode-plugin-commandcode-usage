@@ -2,6 +2,12 @@
 
 opencode plugin that shows [CommandCode](https://commandcode.ai) credits and usage window limits, and registers CommandCode as an opencode provider (models + `/connect`).
 
+![Automatic usage footer on every response](docs/footer.png)
+
+![/usage_commandcode output](docs/usage.png)
+
+_Screenshots show real plugin output rendered in the opencode color theme._
+
 ## Provider registration
 
 CommandCode is not in the opencode provider catalog (models.dev). This plugin registers two providers at startup, both pointing at `https://api.commandcode.ai/provider/v1`:
