@@ -28,6 +28,16 @@ interface Snapshot {
   credits?: number
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 5000): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort("timeout"), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function readKey(): Promise<string | null> {
   const fromEnv = process.env.COMMANDCODE_API_KEY
   if (fromEnv) return fromEnv
@@ -49,12 +59,11 @@ async function apiGet<T>(path: string, key: string, attempts = 3): Promise<T> {
   for (let i = 0; i < attempts; i++) {
     let res: Response
     try {
-      res = await fetch(`${API_BASE}${path}`, {
+      res = await fetchWithTimeout(`${API_BASE}${path}`, {
         headers: {
           Authorization: `Bearer ${key}`,
           "x-command-code-version": "1.32.1",
         },
-        signal: AbortSignal.timeout(5000),
       })
     } catch (e) {
       lastError = new Error(`connect failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -189,6 +198,7 @@ const plugin: TuiPlugin = async (api) => {
       },
     },
   })
+  api.renderer.requestRender()
 
   const tick = async () => {
     if (disposed || inFlight) {
