@@ -1,7 +1,7 @@
-import type { TuiPlugin } from "@opencode-ai/plugin/tui"
+import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 
-const API_BASE = "https://api.commandcode.ai"
 const POLL_MS = 60_000
+const API_BASE = "https://api.commandcode.ai"
 
 interface WindowLimit {
   used?: number
@@ -106,86 +106,28 @@ function fmtReset(at: number | undefined): string {
   return `${m}m`
 }
 
-function bar(used: number, cap: number): string {
-  const pct = cap > 0 ? used / cap : 0
-  const size = 13
-  const filled = Math.max(0, Math.min(size, Math.round(pct * size)))
-  return `${"█".repeat(filled)}${"░".repeat(size - filled)}`
-}
-
-function pctStr(used: number, cap: number): string {
+function pct(used: number, cap: number): string {
   if (cap <= 0) return "?"
   return `${Math.min(100, (used / cap) * 100).toFixed(0)}%`
 }
 
-type Node = { kind: string; props?: Record<string, unknown>; text?: string; children?: Node[] }
-
-function buildViewNodes(snap: Snapshot | null, error: string | null, theme: { text: unknown; textMuted: unknown }): Node[] {
-  const lines: Node[] = [{ kind: "text", props: { fg: theme.text }, children: [{ kind: "b", text: "CommandCode" }] }]
-
-  if (error) {
-    lines.push({ kind: "text", props: { fg: theme.textMuted }, text: error })
-    return lines
-  }
-  if (!snap) {
-    lines.push({ kind: "text", props: { fg: theme.textMuted }, text: "Loading..." })
-    return lines
-  }
-
-  const w5 = snap.fiveHour
-  if (w5) {
-    const reset = fmtReset(w5.resetAt)
-    lines.push({
-      kind: "text",
-      props: { fg: theme.textMuted },
-      text: `5h ${bar(w5.used, w5.cap)} ${pctStr(w5.used, w5.cap)}${reset ? ` · Resets In ${reset}` : ""}`,
-    })
-  }
-
-  const wk = snap.weekly
-  if (wk) {
-    const reset = fmtReset(wk.resetAt)
-    lines.push({
-      kind: "text",
-      props: { fg: theme.textMuted },
-      text: `Weekly ${bar(wk.used, wk.cap)} ${pctStr(wk.used, wk.cap)}${reset ? ` · Resets In ${reset}` : ""}`,
-    })
-  }
-
-  if (snap.credits !== undefined) {
-    lines.push({ kind: "text", props: { fg: theme.textMuted }, text: `$${snap.credits.toFixed(2)} Credits` })
-  }
-
-  return lines
-}
-
-function materialize(nodes: Node[], solid: any): any {
-  const root = solid.createElement("box")
-  solid.setProp(root, "flexDirection", "column")
-  for (const node of nodes) solid.insert(root, materializeNode(node, solid))
-  return root
-}
-
-function materializeNode(node: Node, solid: any): any {
-  const element = solid.createElement(node.kind)
-  for (const [name, value] of Object.entries(node.props ?? {})) {
-    solid.setProp(element, name, value)
-  }
-  if (node.text !== undefined) solid.insert(element, node.text)
-  for (const child of node.children ?? []) {
-    solid.insert(element, materializeNode(child, solid))
-  }
-  return element
+function bar(used: number, cap: number): string {
+  const usedPct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0
+  const size = 13
+  const filled = Math.max(0, Math.min(size, Math.round((usedPct / 100) * size)))
+  return `${"█".repeat(filled)}${"░".repeat(size - filled)}`
 }
 
 const plugin: TuiPlugin = async (api) => {
+  // Use the TUI process's own solid runtime so reactive effects integrate
+  // with the host renderer (same approach as built-in sidebar sections).
   const solid = await import("@opentui/solid").catch(() => null)
   if (!solid) return
+  const solidjs = await import("solid-js").catch(() => null)
+  if (!solidjs || typeof solidjs.createSignal !== "function") return
 
-  let key: string | null = null
-  let keyResolved = false
-  let snap: Snapshot | null = null
-  let error: string | null = null
+  const [snap, setSnap] = solidjs.createSignal<Snapshot | null>(null)
+  const [err, setErr] = solidjs.createSignal<string | null>(null)
   let disposed = false
   let inFlight = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -194,11 +136,10 @@ const plugin: TuiPlugin = async (api) => {
     order: 150,
     slots: {
       sidebar_content() {
-        return materialize(buildViewNodes(snap, error, api.theme.current as { text: unknown; textMuted: unknown }), solid)
+        return buildSidebar(solid, api, snap, err)
       },
     },
   })
-  api.renderer.requestRender()
 
   const tick = async () => {
     if (disposed || inFlight) {
@@ -207,20 +148,16 @@ const plugin: TuiPlugin = async (api) => {
     }
     inFlight = true
     try {
-      if (!keyResolved) {
-        key = await readKey()
-        keyResolved = true
-        if (!key) {
-          error = "CommandCode credentials not found (checked COMMANDCODE_API_KEY and auth.json)"
-          api.renderer.requestRender()
-          return
-        }
+      const key = await readKey()
+      if (!key) {
+        setErr("CommandCode credentials not found (checked COMMANDCODE_API_KEY and auth.json)")
+      } else {
+        setSnap(await fetchSnapshot(key))
+        setErr(null)
       }
-      snap = await fetchSnapshot(key as string)
-      error = null
       api.renderer.requestRender()
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e)
+      setErr(e instanceof Error ? e.message : String(e))
       api.renderer.requestRender()
     } finally {
       inFlight = false
@@ -229,10 +166,7 @@ const plugin: TuiPlugin = async (api) => {
   }
 
   const schedule = () => {
-    // Retry quickly while the first successful fetch is still pending (or the
-    // first one failed), so the sidebar does not sit on "Loading..." or an
-    // error line for a full poll interval after a transient startup failure.
-    const delay = snap === null ? (error ? 10_000 : 5_000) : POLL_MS
+    const delay = snap() === null ? (err() ? 10_000 : 5_000) : POLL_MS
     timer = setTimeout(tick, delay)
   }
 
@@ -242,6 +176,77 @@ const plugin: TuiPlugin = async (api) => {
     disposed = true
     if (timer) clearTimeout(timer)
   })
+}
+
+/**
+ * Builds a reactive sidebar element: the child list is passed to
+ * `solid.insert` as an accessor, so it re-evaluates whenever the underlying
+ * signals change — updating the on-screen text even while the TUI is idle.
+ */
+function buildSidebar(solid: any, api: TuiPluginApi, snap: () => Snapshot | null, err: () => string | null) {
+  const box = solid.createElement("box")
+  solid.setProp(box, "flexDirection", "column")
+
+  const children = () => {
+    const s = snap()
+    const e = err()
+    const theme = api.theme.current
+    const out: any[] = []
+
+    const title = solid.createElement("text")
+    solid.setProp(title, "fg", theme.text)
+    const titleBox = solid.createElement("b")
+    solid.insert(titleBox, "CommandCode")
+    solid.insert(title, titleBox)
+    out.push(title)
+
+    if (e) {
+      const t = solid.createElement("text")
+      solid.setProp(t, "fg", theme.textMuted)
+      solid.insert(t, e)
+      out.push(t)
+    } else if (!s) {
+      const t = solid.createElement("text")
+      solid.setProp(t, "fg", theme.textMuted)
+      solid.insert(t, "Loading...")
+      out.push(t)
+    } else {
+      const w5 = s.fiveHour
+      if (w5) {
+        const reset = fmtReset(w5.resetAt)
+        const t = solid.createElement("text")
+        solid.setProp(t, "fg", theme.textMuted)
+        solid.insert(t, `5h ${bar(w5.used, w5.cap)} ${pct(w5.used, w5.cap)}${reset ? ` · Resets In ${reset}` : ""}`)
+        out.push(t)
+      }
+      const wk = s.weekly
+      if (wk) {
+        const reset = fmtReset(wk.resetAt)
+        const t = solid.createElement("text")
+        solid.setProp(t, "fg", theme.textMuted)
+        solid.insert(t, `Weekly ${bar(wk.used, wk.cap)} ${pct(wk.used, wk.cap)}${reset ? ` · Resets In ${reset}` : ""}`)
+        out.push(t)
+      }
+      if (s.credits !== undefined) {
+        const t = solid.createElement("text")
+        solid.setProp(t, "fg", theme.textMuted)
+        solid.insert(t, `$${s.credits.toFixed(2)} Credits`)
+        out.push(t)
+      }
+      if (!w5 && !wk && s.credits === undefined) {
+        const t = solid.createElement("text")
+        solid.setProp(t, "fg", theme.textMuted)
+        solid.insert(t, "No Usage Data")
+        out.push(t)
+      }
+    }
+    return out
+  }
+
+  // Pass an accessor: solid's insert tracks the signals read inside and
+  // re-runs it on change, replacing the rendered children.
+  solid.insert(box, () => children())
+  return box
 }
 
 export default {
