@@ -28,8 +28,20 @@ interface Snapshot {
   credits?: number
 }
 
-function readKey(): string | null {
-  return process.env.COMMANDCODE_API_KEY ?? null
+async function readKey(): Promise<string | null> {
+  const fromEnv = process.env.COMMANDCODE_API_KEY
+  if (fromEnv) return fromEnv
+
+  const home = process.env.HOME
+  if (!home) return null
+  try {
+    const file = Bun.file(`${home}/.local/share/opencode/auth.json`)
+    if (!(await file.exists())) return null
+    const auth = (await file.json()) as Record<string, { key?: string }>
+    return auth?.["commandcode"]?.key ?? auth?.["commandcode-claude"]?.key ?? null
+  } catch {
+    return null
+  }
 }
 
 async function apiGet<T>(path: string, key: string, attempts = 3): Promise<T> {
@@ -161,9 +173,10 @@ const plugin: TuiPlugin = async (api) => {
   const solid = await import("@opentui/solid").catch(() => null)
   if (!solid) return
 
-  const key = readKey()
+  let key: string | null = null
+  let keyResolved = false
   let snap: Snapshot | null = null
-  let error: string | null = key ? null : "COMMANDCODE_API_KEY is not set"
+  let error: string | null = null
   let disposed = false
   let inFlight = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -178,13 +191,22 @@ const plugin: TuiPlugin = async (api) => {
   })
 
   const tick = async () => {
-    if (disposed || inFlight || !key) {
+    if (disposed || inFlight) {
       if (!disposed) schedule()
       return
     }
     inFlight = true
     try {
-      snap = await fetchSnapshot(key)
+      if (!keyResolved) {
+        key = await readKey()
+        keyResolved = true
+        if (!key) {
+          error = "CommandCode credentials not found (checked COMMANDCODE_API_KEY and auth.json)"
+          api.renderer.requestRender()
+          return
+        }
+      }
+      snap = await fetchSnapshot(key as string)
       error = null
       api.renderer.requestRender()
     } catch (e) {
@@ -197,11 +219,14 @@ const plugin: TuiPlugin = async (api) => {
   }
 
   const schedule = () => {
-    timer = setTimeout(tick, POLL_MS)
+    // Retry quickly while the first successful fetch is still pending (or the
+    // first one failed), so the sidebar does not sit on "Loading..." or an
+    // error line for a full poll interval after a transient startup failure.
+    const delay = snap === null ? (error ? 10_000 : 5_000) : POLL_MS
+    timer = setTimeout(tick, delay)
   }
 
-  if (key) void tick()
-  else schedule()
+  void tick()
 
   api.lifecycle.onDispose(() => {
     disposed = true

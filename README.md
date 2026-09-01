@@ -2,11 +2,10 @@
 
 opencode plugin that shows [CommandCode](https://commandcode.ai) credits and usage window limits, and registers CommandCode as an opencode provider (models + `/connect`).
 
-![Automatic usage footer on every response](docs/footer.png)
 
 ![/usage_commandcode output](docs/usage.png)
 
-_Screenshots show real plugin output rendered in the opencode color theme._
+_Screenshot shows real plugin output rendered in the opencode color theme._
 
 ## Provider registration
 
@@ -56,14 +55,10 @@ Data sources (read-only GET):
 - These are internal `/alpha/` endpoints used by the CommandCode CLI itself; they may change without notice.
 - API calls are retried up to 3 times (500ms/1s backoff) because `api.commandcode.ai` connectivity can be intermittent on IPv6-blackholed networks.
 
-## Automatic footer
+## Automatic sidebar display
 
-Every assistant response gets a one-line usage footer appended (same technique as opencode-quotas, via the `experimental.text.complete` hook). Footer data is cached for 60s so each response does not trigger an API call.
+Instead of appending usage lines to chat messages, quota status now lives in the TUI right sidebar (see **TUI sidebar section** below). The old `experimental.text.complete` footer injection was removed so conversations and LLM context stay clean.
 
-- Disable: `USAGE_FOOTER=0`
-- Cache TTL: `USAGE_FOOTER_TTL_MS` (default `60000`)
-
-The footer is stored in the message text, so it also becomes part of the LLM context on subsequent turns.
 
 ## TUI sidebar section
 

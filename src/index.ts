@@ -1,12 +1,11 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import { HANDLED, createFooterCache, createMessageGuard, output, sendStatusMessage } from "./shared"
-import { fetchFooterLine, fetchUsage, renderUsage, type UsageResult } from "./usage"
+import { HANDLED, output, sendStatusMessage } from "./shared"
+import { fetchUsage, renderUsage, type UsageResult } from "./usage"
 import { PROVIDER_ID, ANTHROPIC_PROVIDER_ID, buildAnthropicProviderConfig, buildProviderConfig, fetchModels, readKey, type BuiltProvider } from "./provider"
 
 const OWN_COMMAND = "usage_commandcode"
 const ALIASES = ["commandcode", "cmd", "cc"]
 const PROVIDER_LABEL = "CommandCode"
-const FOOTER_TAG = "⋯CommandCode"
 
 const SHARED_HELP =
   "Usage quota commands: /usage ollama, /usage synthetic, /usage commandcode (or /usage_ollama, /usage_synthetic, /usage_commandcode)"
@@ -18,18 +17,7 @@ function matchesSharedUsage(command: string, args: string): boolean {
 }
 
 export const CommandcodeUsagePlugin: Plugin = async ({ client }) => {
-  const footerCache = createFooterCache(fetchFooterLine)
-  const { claim: claimMessage } = createMessageGuard()
-
   return {
-    "experimental.text.complete": async (input, output) => {
-      if (!claimMessage(input.messageID)) return
-      if (output.text.includes(FOOTER_TAG)) return
-      const line = await footerCache.get()
-      if (!line) return
-      output.text = `${output.text}\n\n${FOOTER_TAG}: ${line}`
-    },
-
     config: async (input) => {
       const config = input as {
         command?: Record<string, { template: string; description: string }>

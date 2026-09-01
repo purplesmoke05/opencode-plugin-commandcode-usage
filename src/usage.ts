@@ -141,20 +141,3 @@ export function renderUsage(result: UsageResult): { stdout: string[]; stderr: st
   return { stdout: lines, stderr: [] }
 }
 
-export async function fetchFooterLine(): Promise<string> {
-  const result = await fetchUsage()
-  if (!result.ok) throw new Error(result.error ?? "fetch failed")
-  const parts: string[] = []
-  if (result.windowLimits?.fiveHour) {
-    parts.push(`5h ${(result.windowLimits.fiveHour.used ?? 0).toFixed(1)}/${result.windowLimits.fiveHour.cap ?? "?"} Credits`)
-  }
-  if (result.windowLimits?.weekly) {
-    parts.push(`Weekly ${(result.windowLimits.weekly.used ?? 0).toFixed(1)}/${result.windowLimits.weekly.cap ?? "?"} Credits`)
-  }
-  if (result.credits) {
-    const total = (result.credits.monthlyCredits ?? 0) + (result.credits.purchasedCredits ?? 0) + (result.credits.freeCredits ?? 0)
-    parts.push(`$${total.toFixed(2)} Credits`)
-  }
-  if (!parts.length) parts.push("No Usage Data")
-  return parts.join(" · ")
-}
