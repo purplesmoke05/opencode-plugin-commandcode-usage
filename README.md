@@ -64,3 +64,17 @@ Every assistant response gets a one-line usage footer appended (same technique a
 - Cache TTL: `USAGE_FOOTER_TTL_MS` (default `60000`)
 
 The footer is stored in the message text, so it also becomes part of the LLM context on subsequent turns.
+
+## TUI sidebar section
+
+The plugin also ships a TUI plugin (`src/tui.ts`) that renders a live usage section in the right sidebar (next to Context/MCP/LSP), refreshed every 60s. Register it in `tui.json`:
+
+```json
+{
+  "plugin": [
+    "file:///absolute/path/to/opencode-plugin-<provider>-usage/src/tui.ts"
+  ]
+}
+```
+
+It follows the host-solid pattern used by oh-my-openagent (dynamic `import("@opentui/solid")` + manual node materialization), so it shares the TUI process's renderer instance. Requires the same API key environment variable as the server plugin.
