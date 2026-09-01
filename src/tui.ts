@@ -106,15 +106,14 @@ function fmtReset(at: number | undefined): string {
   return `${m}m`
 }
 
-function pct(used: number, cap: number): string {
-  if (cap <= 0) return "?"
-  return `${Math.min(100, (used / cap) * 100).toFixed(0)}%`
+function leftPct(used: number, cap: number): number {
+  if (cap <= 0) return 0
+  return Math.max(0, 100 - (used / cap) * 100)
 }
 
-function bar(used: number, cap: number): string {
-  const usedPct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0
+function bar(leftPct: number): string {
   const size = 13
-  const filled = Math.max(0, Math.min(size, Math.round((usedPct / 100) * size)))
+  const filled = Math.max(0, Math.min(size, Math.round((leftPct / 100) * size)))
   return `${"█".repeat(filled)}${"░".repeat(size - filled)}`
 }
 
@@ -216,7 +215,8 @@ function buildSidebar(solid: any, api: TuiPluginApi, snap: () => Snapshot | null
         const reset = fmtReset(w5.resetAt)
         const t = solid.createElement("text")
         solid.setProp(t, "fg", theme.textMuted)
-        solid.insert(t, `5h ${bar(w5.used, w5.cap)} ${pct(w5.used, w5.cap)}${reset ? ` · Resets In ${reset}` : ""}`)
+        const left = leftPct(w5.used, w5.cap)
+        solid.insert(t, `5h ${bar(left)} ${left.toFixed(0)}% Left${reset ? ` · Resets In ${reset}` : ""}`)
         out.push(t)
       }
       const wk = s.weekly
@@ -224,7 +224,8 @@ function buildSidebar(solid: any, api: TuiPluginApi, snap: () => Snapshot | null
         const reset = fmtReset(wk.resetAt)
         const t = solid.createElement("text")
         solid.setProp(t, "fg", theme.textMuted)
-        solid.insert(t, `Weekly ${bar(wk.used, wk.cap)} ${pct(wk.used, wk.cap)}${reset ? ` · Resets In ${reset}` : ""}`)
+        const left = leftPct(wk.used, wk.cap)
+        solid.insert(t, `Weekly ${bar(left)} ${left.toFixed(0)}% Left${reset ? ` · Resets In ${reset}` : ""}`)
         out.push(t)
       }
       if (s.credits !== undefined) {
