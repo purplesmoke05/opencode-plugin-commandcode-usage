@@ -57,6 +57,7 @@ export interface BuiltProvider {
       name?: string
       limit?: { context?: number; output?: number }
       reasoning?: boolean
+      readonly variants?: Readonly<Record<string, { readonly reasoningEffort: string }>>
       attachment?: boolean
       tool_call?: boolean
       temperature?: boolean
@@ -65,13 +66,15 @@ export interface BuiltProvider {
 }
 
 function modelEntry(m: { id: string; name?: string; context_length?: number }) {
+  const isDeepSeekV41Flash = m.id === "deepseek/deepseek-v4.1-flash"
   return {
     name: m.name ?? m.id,
     limit: {
       context: m.context_length ?? 200_000,
       output: 64_000,
     },
-    reasoning: REASONING_HINT.test(m.id),
+    reasoning: isDeepSeekV41Flash || REASONING_HINT.test(m.id),
+    ...(isDeepSeekV41Flash ? { variants: { max: { reasoningEffort: "max" } } } : {}),
     attachment: VISION_HINT.test(m.id),
     tool_call: true,
     temperature: true,
